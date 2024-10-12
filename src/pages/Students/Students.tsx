@@ -1,9 +1,10 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { getStudents } from 'apis/students.api'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { deleteStudent, getStudent, getStudents } from 'apis/students.api'
 import Skeletent from 'components/Skeletent'
 import { Link } from 'react-router-dom'
 import { useQueryString } from 'utils/utils'
 import classNames from 'classnames'
+import { toast } from 'react-toastify'
 
 const LIMIT: number = 10
 
@@ -24,27 +25,53 @@ export default function Students() {
 
   const queryString: { page?: string } = useQueryString()
 
+  const queryClient = useQueryClient()
+
   const page: number = Number(queryString.page) || 1
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['students', [page]], //Giá trị page cần được theo dõi để update giống dependencies
+  const studentsQuery = useQuery({
+    queryKey: ['students', page], //Giá trị page cần được theo dõi để update giống dependencies
     queryFn: () => getStudents(page, LIMIT),
     // staleTime: 60 * 1000,
     // gcTime: 5 * 1000 // cacheTime
-    placeholderData: keepPreviousData //keepPreviousData: true
+    placeholderData: keepPreviousData //keepPreviousData: true // giữ data trước làm cho chuyển sang trang load lại data mượt mà hơn
   })
 
-  console.log(data)
+  console.log(studentsQuery)
 
-  console.log({
-    data: data?.data,
-    isLoading: isLoading,
-    isFetching: isFetching
+  const deleteStudentMutation = useMutation({
+    mutationFn: (id: string | number) => {
+      return deleteStudent(id)
+    },
+    onSuccess: (_, id) => {
+      toast.success(`Xoá Thành Công Student ${id}`)
+
+      //TODO:  {
+      queryClient.invalidateQueries({ queryKey: ['students', page], exact: true })
+      //exact: true làm cho chính xác hơn khi queryKey
+      //làm cho queryKey: ['students', page] refresh lại được hiểu
+      //TODO : studentsQuery cũ nên update lại làm cho  queryFn: () => getStudents(page, LIMIT) gọi lại
+      //End }
+    }
   })
 
-  const totalStudentCount = Number(data?.headers['x-total-count']) || 0
+  const totalStudentCount = Number(studentsQuery.data?.headers['x-total-count']) || 0
 
   const totalPage = Math.ceil(totalStudentCount / LIMIT)
+
+  const handleDelete = (id: number | string) => {
+    deleteStudentMutation.mutate(id)
+  }
+
+  // Prefetching
+
+  const handlePrefetchStudent = (id: number) => {
+    queryClient.prefetchQuery({
+      queryKey: ['student', id],
+      queryFn: () => getStudent(id),
+      staleTime: 10 * 1000
+    })
+  }
 
   return (
     <div>
@@ -58,7 +85,7 @@ export default function Students() {
         Add Student
       </Link>
 
-      {isLoading && <Skeletent />}
+      {studentsQuery.isLoading && <Skeletent />}
 
       <div className='relative mt-6 overflow-x-auto shadow-md sm:rounded-lg'>
         <table className='w-full text-left text-sm text-gray-500 dark:text-gray-400'>
@@ -82,10 +109,11 @@ export default function Students() {
             </tr>
           </thead>
           <tbody>
-            {data?.data.map((student) => (
+            {studentsQuery.data?.data.map((student) => (
               <tr
                 key={student.id}
                 className='border-b bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-600'
+                onMouseEnter={() => handlePrefetchStudent(student.id)}
               >
                 <td className='py-4 px-6'>{student.id}</td>
                 <td className='py-4 px-6'>
@@ -96,10 +124,18 @@ export default function Students() {
                 </th>
                 <td className='py-4 px-6'>{student.email}</td>
                 <td className='py-4 px-6 text-right'>
-                  <Link to='/students/1' className='mr-5 font-medium text-blue-600 hover:underline dark:text-blue-500'>
+                  <Link
+                    to={`/students/${student.id}`}
+                    className='mr-5 font-medium text-blue-600 hover:underline dark:text-blue-500'
+                  >
                     Edit
                   </Link>
-                  <button className='font-medium text-red-600 dark:text-red-500'>Delete</button>
+                  <button
+                    onClick={() => handleDelete(student.id)}
+                    className='font-medium text-red-600 dark:text-red-500'
+                  >
+                    Delete
+                  </button>
                 </td>
               </tr>
             ))}

@@ -1,7 +1,8 @@
-import { useMutation } from '@tanstack/react-query'
-import { addStudent } from 'apis/students.api'
-import React, { useMemo, useState } from 'react'
-import { useMatch } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { addStudent, getStudent, updateStudent } from 'apis/students.api'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useMatch, useParams } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import { Student } from 'types/student.type'
 import { isAxiosError } from 'utils/utils'
 
@@ -26,12 +27,46 @@ export type FormError =
 export default function AddStudent() {
   const [formState, setFormState] = useState<FormStateType>(initialFormState)
 
+  const genderRef = useRef({ male: 'Male', female: 'Female', other: 'Other' })
+
   const addMatch = useMatch('/students/add')
 
   const isAddMode = Boolean(addMatch)
 
-  //mutate để gọi ra 1 hàm và truyền giá trị gửi lên
-  const { mutate, mutateAsync, error, data, reset } = useMutation({
+  const { id } = useParams()
+
+  const queryClient = useQueryClient()
+
+  useQuery({
+    queryKey: ['student', id],
+    queryFn: () => {
+      getStudent(id as string).then((data) => {
+        setFormState(data.data)
+      })
+    },
+    enabled: id !== undefined, // id truyền undefine => để
+    // xử lý vấn đề này query cung cấp thêm field enalbled
+    // khi nào id khác undefine thì queryFn mới được gọi // ngang bằng onSuccess v4
+    staleTime: 1000 * 10 //xem giá trị cũ đã quá 10 giây chưa - nếu quá 10s thì nó mới gọi **queryFn**
+  })
+
+  // useEffect(() => {
+  //   if (studentQuery.data) {
+  //     setFormState(studentQuery.data.data)
+  //   }
+  // }, [studentQuery.data])
+
+  const updateStudenMutation = useMutation({
+    mutationFn: () => {
+      return updateStudent(id as string, formState as Student)
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['student', id], data) //vì khi update data vẫn lưu lại giá trị cũ nên dùng cách này để cập nhật data
+    }
+  })
+
+  //mutate === mutateAsync(nhưng hàm này cung cấp thêm Promise để try_catch) để gọi ra 1 hàm và truyền giá trị gửi lên
+  const addStudentMutation = useMutation({
     mutationFn: (body: FormStateType) => {
       // handle data here
       return addStudent(body)
@@ -44,22 +79,23 @@ export default function AddStudent() {
     return (e: React.ChangeEvent<HTMLInputElement>) => {
       setFormState((prev) => ({ ...prev, [name]: e.target.value }))
 
-      if (data || error) {
-        reset()
+      if (addStudentMutation.data || addStudentMutation.error) {
+        addStudentMutation.reset() //làm mới lại không báo lỗi nhưng vẫn giữ nguyên giá trị
       }
     }
   }
 
   const errorForm = useMemo(() => {
+    const error = isAddMode ? addStudentMutation.error : updateStudenMutation.error
+
     if (isAxiosError<{ error: FormError }>(error) && error.response?.status === 422) {
       return error?.response?.data?.error
     }
     return null
-  }, [error])
+  }, [addStudentMutation, isAddMode, updateStudenMutation])
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-
     // try {
     //   const data = await mutateAsync(initialFormState, {
     //     onSuccess: () => {
@@ -70,12 +106,20 @@ export default function AddStudent() {
     // } catch (error) {
     //   console.log(error)
     // }
-
-    mutate(formState, {
-      onSuccess: () => {
-        setFormState(initialFormState)
-      }
-    })
+    if (isAddMode) {
+      addStudentMutation.mutate(formState, {
+        onSuccess: () => {
+          setFormState(initialFormState)
+          toast.success('Thêm Thành Công')
+        }
+      })
+    } else {
+      updateStudenMutation.mutate(undefined, {
+        onSuccess: (data) => {
+          toast.success('Cập Nhật Thành Công')
+        }
+      })
+    }
   }
 
   return (
@@ -114,8 +158,8 @@ export default function AddStudent() {
                   id='gender-1'
                   type='radio'
                   name='gender'
-                  value={'male'}
-                  checked={formState.gender === 'male'}
+                  value={genderRef.current.male}
+                  checked={formState.gender === genderRef.current.male}
                   onChange={handleChange('gender')}
                   className='h-4 w-4 border-gray-300 bg-gray-100 text-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:ring-offset-gray-800 dark:focus:ring-blue-600'
                 />
@@ -128,8 +172,8 @@ export default function AddStudent() {
                   id='gender-2'
                   type='radio'
                   name='gender'
-                  value={'female'}
-                  checked={formState.gender === 'female'}
+                  value={genderRef.current.female}
+                  checked={formState.gender === genderRef.current.female}
                   onChange={handleChange('gender')}
                   className='h-4 w-4 border-gray-300 bg-gray-100 text-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:ring-offset-gray-800 dark:focus:ring-blue-600'
                 />
@@ -142,8 +186,8 @@ export default function AddStudent() {
                   id='gender-3'
                   type='radio'
                   name='gender'
-                  value={'other'}
-                  checked={formState.gender === 'other'}
+                  value={genderRef.current.other}
+                  checked={formState.gender === genderRef.current.other}
                   onChange={handleChange('gender')}
                   className='h-4 w-4 border-gray-300 bg-gray-100 text-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:ring-offset-gray-800 dark:focus:ring-blue-600'
                 />
@@ -253,7 +297,7 @@ export default function AddStudent() {
           type='submit'
           className='w-full rounded-lg bg-blue-700 px-5 py-2.5 text-center text-sm font-medium text-white hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-300 dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800 sm:w-auto'
         >
-          Submit
+          {isAddMode ? 'Add' : 'Update'}
         </button>
       </form>
     </div>
